@@ -1,18 +1,10 @@
 import requests as req
-import pymysql as db
 import numpy as np
 import pandas as pd
 import time
+import json
+from pathlib import Path
 REST_API_KEY = "dbda976eb054714809926c699703fc3b"
-conn= db.connect(
-    host="127.0.0.1",
-    user="root",
-    password="Simple645*",
-    database="mydb",
-    port=3306,
-    charset="utf8mb4"
-)
-cur = conn.cursor()
 url ="https://dapi.kakao.com/v2/local/search/category.json"
 headers = {"Authorization": f"KakaoAK {REST_API_KEY}"}
 def generate_grid_points(center_lat, center_lng, grid_km=1, grids=3):
@@ -84,6 +76,7 @@ seoul_gu=[
   (37.563646, 126.997565,3),
   (37.606320, 127.092584,3)
 ]
+
 category_code = ["CE7","FD6","AD5","AT4","CT1","MT1","CS2"]
 
 category_table = {
@@ -95,7 +88,7 @@ category_table = {
    "MT1" : "mart",
    "CS2" : "cstore"
 }
-result =[]
+
 # print(category_code[0])
 # params={
 #   'category_group_code' : category_code[0],
@@ -109,35 +102,89 @@ result =[]
 
 # data=res.json()
 # print(data)
-cat_index = 0
-gu_index = 0
-for i in range (1,701):
-  print(f'{i}번째 데이터 파싱')
-  (y,x,grid)=seoul_gu[gu_index]
-  pointgrid = generate_grid_points(y,x,grids=grid)
-  for j in range (len(pointgrid)):
-    (y,x) = pointgrid[j]
-    l = 1
-    while True :
-      params={
-      'category_group_code' : category_code[cat_index],
-      'x':x,
-      'y':y,
-      'radius':2000,
-      'page':l,
-      'size':15
-      }
-      res = req.get(url,params=params,headers=headers)
-      data = res.json()
-      result.append(data['documents'])
-      if data['meta']['is_end']==True:
-        break
-      else:
-        l+=1
-        time.sleep(0.3)
-  gu_index+=1
-  if gu_index == len(seoul_gu):
-    gu_index=0
-    cat_index+=1
-  if cat_index == len(category_code):
-    break
+
+grid_gu = []
+for i in (len(seoul_gu)):
+  (y,x,gird)=seoul_gu[i]
+  grid_gu.append(generate_grid_points(y,x,gird=gird))
+print(len(grid_gu))
+cat_index=0
+grid_index=0
+page_index=1
+if Path("place.csv").exists():
+  df=pd.read_csv("place.csv")
+else:
+  columns=[
+  'place_name','place_url','category_name','address_name','road_address_name','phone','place_x','place_y'
+  ]
+  df = pd.DataFrame(columns=columns)
+  df.to_csv("place.csv")
+
+if Path("index.json").exists():
+  index=pd.read_json("index.json")
+  cat_index=index['cat_index'].iloc[0]
+  grid_index=index['grid_index'].iloc[0]
+  page_index=index['page_index'].iloc[0]
+else:
+  index={
+    'cat_index':0,
+    'grid_index':0,
+    'page_index':1
+  }
+  index = pd.DataFrame([index])
+  index.to_json("index.json")
+
+
+
+get_data = []
+while True :
+  count+=1
+  category = category_code[cat_index]
+  (y,x)=grid_gu[grid_index]
+  params={
+    'category_group_code' : category,
+    'x':x,
+    'y':y,
+    'radius':2000,
+    'page':page_index,
+    'size':15
+  }
+  res = req.get(url,params=params,headers=headers)
+  data=res.json()
+  depth = len(data['documents'])
+  document = data['documents']
+  meta = data['meta']
+  for i in range(depth):
+    temp = document[i]
+    place_name = temp['place_name']
+    place_url = temp['place_url']
+    category_name = temp['category_name']
+    address_name = temp['address_name']
+    road_address_name = temp['road_address_name']
+    phone = temp['phone']
+    place_x = temp['x']
+    place_y = temp['y']
+    tempdict={
+      'place_name':place_name,
+      'place_url':place_url,
+      'category_name':category_name,
+      'address_name':address_name,
+      'road_address_name':road_address_name,
+      'phone':phone,
+      'place_x':place_x,
+      'place_y':place_y
+    }
+    tempdf=pd.DataFrame([tempdict])
+    pd.concat([df,tempdf],ignore_index=False)
+
+  if abs(8000-count)<45 :
+     break
+   
+index = {
+  'cat_index' : cat_index,
+  'grid_index' : grid_index,
+  'page_index' : page_index
+}
+
+with open("index.json","w",encoding='UTF-8') as f:
+    json.dump(index,f,ensure_ascii=False,indent=4)
